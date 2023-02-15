@@ -21,12 +21,12 @@ jobs:
       - name: Build source archive
         continue-on-error: true
         run: |
-          staging="sslscan-src-${{ env.sslscan_VERSION }}-x86_64-${{ matrix.cc }}"
-          touch "$staging.tar.xz"
-          tar --exclude=*.tar* -cv . | xz -9 > "$staging.tar.xz"
-          echo "ASSET_SRC=$staging.tar.xz" >> $GITHUB_ENV
-          echo "source archive name: "
-          ls -l "$staging.tar.xz"
+          staging="sslscan-src-${{ env.sslscan_VERSION }}-x86_64-${{ matrix.cc }}.tar.xz"
+          touch "$staging"
+          tar --exclude=*.tar* -cv . | xz -9 > "$staging"
+          echo "ASSET_SRC=$staging" >> $GITHUB_ENV
+          echo "source archive name: " "$staging"
+          ls -l "$staging"
           ls -l ${{ env.ASSET_SRC }}
 
       - name: Build with ${{ matrix.cc }}
@@ -41,7 +41,7 @@ jobs:
           staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-${{ matrix.cc }}.tar.xz"
           tar --exclude=*.tar* -cv sslscan | xz -9 > "$staging"
           echo "ASSET=$staging" >> $GITHUB_ENV
-          echo "release archive name: "
+          echo "release archive name: " "$staging"
           ls -l "$staging"
           ls -l ${{ env.ASSET }}
 
@@ -50,7 +50,7 @@ jobs:
           staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-${{ matrix.cc }}.zip"
           zip "$staging" sslscan
           echo "ASSET_zip=$staging" >> $GITHUB_ENV
-          echo "release archive name: "
+          echo "release archive name: " "$staging"
           ls -l "$staging"
           ls -l ${{ env.ASSET_zip }}
 
@@ -60,8 +60,9 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
+            ${{ env.ASSET_SRC }}
             ${{ env.ASSET }}
-            ${{ env.ASSET_SRC }}          
+            ${{ env.ASSET_zip }}
 
   build_mingw:
     runs-on: ubuntu-latest
@@ -72,12 +73,12 @@ jobs:
       - name: Build source archive
         continue-on-error: true
         run: |
-          staging="sslscan-src-${{ env.sslscan_VERSION }}-x86_64-mingw"
-          touch "$staging.tar.xz"
-          tar --exclude=*.tar* -cv . | xz -9 > "$staging.tar.xz"
-          echo "ASSET_SRC=$staging.tar.xz" >> $GITHUB_ENV
-          echo "source archive name: "
-          ls -l "$staging.tar.xz"
+          staging="sslscan-src-${{ env.sslscan_VERSION }}-x86_64-mingw.tar.xz"
+          touch "$staging"
+          tar --exclude=*.tar* -cv . | xz -9 > "$staging"
+          echo "ASSET_SRC=$staging" >> $GITHUB_ENV
+          echo "source archive name: " "$staging"
+          ls -l "$staging"
           ls -l ${{ env.ASSET_SRC }}
 
       - name: Install mingw-w64
@@ -93,7 +94,7 @@ jobs:
           staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-mingw.tar.xz"
           tar --exclude=*.tar* -cv sslscan.exe | xz -9 > "$staging"
           echo "ASSET=$staging" >> $GITHUB_ENV
-          echo "release archive name: "
+          echo "release archive name: " "$staging"
           ls -l "$staging"
           ls -l ${{ env.ASSET }}
 
@@ -102,7 +103,7 @@ jobs:
           staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-mingw.zip"
           zip "$staging" sslscan.exe
           echo "ASSET_zip=$staging" >> $GITHUB_ENV
-          echo "release archive name: "
+          echo "release archive name: " "$staging"
           ls -l "$staging"
           ls -l ${{ env.ASSET_zip }}
 
@@ -112,6 +113,6 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            ${{ env.ASSET_SRC }}          
+            ${{ env.ASSET_SRC }}
             ${{ env.ASSET }}
             ${{ env.ASSET_zip }}
