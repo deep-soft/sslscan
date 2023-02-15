@@ -36,14 +36,23 @@ jobs:
         env:
           CC: ${{ matrix.cc }}
 
-      - name: Build archive release
+      - name: Build archive release tar.xz
         run: |
-          staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-${{ matrix.cc }}"
-          tar --exclude=*.tar* -cv sslscan.exe | xz -9 > "$staging.tar.xz"
-          echo "ASSET=$staging.tar.xz" >> $GITHUB_ENV
+          staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-${{ matrix.cc }}.tar.xz"
+          tar --exclude=*.tar* -cv sslscan | xz -9 > "$staging"
+          echo "ASSET=$staging" >> $GITHUB_ENV
           echo "release archive name: "
-          ls -l "$staging.tar.xz"
-          ls -l ${{ env.ASSET_SRC }}
+          ls -l "$staging"
+          ls -l ${{ env.ASSET }}
+
+      - name: Build archive release zip
+        run: |
+          staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-${{ matrix.cc }}.zip"
+          zip "$staging" sslscan
+          echo "ASSET_zip=$staging" >> $GITHUB_ENV
+          echo "release archive name: "
+          ls -l "$staging"
+          ls -l ${{ env.ASSET_zip }}
 
       - name: Publish Release
         uses: deep-soft/action-gh-release@v1
@@ -79,14 +88,23 @@ jobs:
         run: |
           make -f Makefile.mingw
 
-      - name: Build archive release
+      - name: Build archive release tar.xz
         run: |
-          staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-mingw"
-          tar --exclude=*.tar* -cv sslscan.exe | xz -9 > "$staging.tar.xz"
-          echo "ASSET=$staging.tar.xz" >> $GITHUB_ENV
+          staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-mingw.tar.xz"
+          tar --exclude=*.tar* -cv sslscan.exe | xz -9 > "$staging"
+          echo "ASSET=$staging" >> $GITHUB_ENV
           echo "release archive name: "
-          ls -l "$staging.tar.xz"
-          ls -l ${{ env.ASSET_SRC }}
+          ls -l "$staging"
+          ls -l ${{ env.ASSET }}
+
+      - name: Build archive release zip
+        run: |
+          staging="sslscan-${{ env.sslscan_VERSION }}-x86_64-mingw.zip"
+          zip "$staging" sslscan.exe
+          echo "ASSET_zip=$staging" >> $GITHUB_ENV
+          echo "release archive name: "
+          ls -l "$staging"
+          ls -l ${{ env.ASSET_zip }}
 
       - name: Publish Release
         uses: deep-soft/action-gh-release@v1
