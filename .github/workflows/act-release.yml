@@ -28,7 +28,7 @@ jobs:
         run: |
           VERSION="$(grep -E -o -m 1 '[0-9]+\.[0-9]+\.[0-9]+(\-[a-z]+[0-9]+)?' Changelog)";
           echo "VERSION=$VERSION";
-          echo "PROG_VERSION=VERSION" >> $GITHUB_ENV;
+          echo "PROG_VERSION=$VERSION" >> $GITHUB_ENV;
 
       - name: Print version
         run: |
