@@ -49,7 +49,7 @@ jobs:
           path: '*'
           env_variable: 'ZIP_ARCHIVE_SRC'
 
-      - name: Build with ${{ matrix.job.cc }}
+      - name: Build with clang/gcc
         if: ${{ matrix.job.cc == 'clang' || matrix.job.cc == 'gcc' }}
         continue-on-error: true
         run: |
@@ -58,7 +58,7 @@ jobs:
         env:
           CC: ${{ matrix.job.cc }}
 
-      - name: Install mingw-w64
+      - name: Build with mingw-w64
         continue-on-error: true
         if: ${{ matrix.job.cc == 'mingw-w64' }}
         run: |
