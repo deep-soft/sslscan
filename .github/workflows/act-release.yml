@@ -47,7 +47,7 @@ jobs:
           env_variable: 'ZIP_SRC_ARCHIVE'
 
       - name: Build with ${{ matrix.cc }}
-        if: ${{ matrix.cc }} == 'clang' || ${{ matrix.cc }} == 'gcc'
+        if: ${{ matrix.cc == 'clang' || matrix.cc == 'gcc' }}
         continue-on-error: true
         run: |
           make sslscan
@@ -57,7 +57,7 @@ jobs:
 
       - name: Install mingw-w64
         continue-on-error: true
-        if: ${{ matrix.cc }} == 'mingw-w64'
+        if: ${{ matrix.cc == 'mingw-w64' }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -qq mingw-w64
@@ -75,7 +75,7 @@ jobs:
         with:
           type: 'zip'
           filename: '${{ env.PROG_NAME }}-${{ env.PROG_VERSION }}-x86_64-${{ matrix.cc }}.zip'
-          directory: 'out'
+          directory: 'out_release'
           exclusions: '*.map *.pdb'
           recursive_exclusions: '*.map *.pdb'
           path: '*'
