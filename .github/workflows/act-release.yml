@@ -1,0 +1,90 @@
+# 2024-02-03 09:50
+# # Set the version string for the program.
+# VERSION = "$(shell grep -E -o -m 1 '[0-9]+\.[0-9]+\.[0-9]+(\-[a-z]+[0-9]+)?' Changelog) Windows $(ARCHITECTURE) (Mingw)"
+name: act-release
+
+on:
+  workflow_dispatch:
+#  push
+
+env:
+  PROG_NAME:    "sslscan"
+  PROG_VERSION: "v2.0.0"
+  TAG_NAME:     "sslscan"
+  TAG_VERSION:  "v2.0.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [clang, gcc, mingw-w64]
+    steps:
+      - name: checkout
+        uses: deep-soft/checkout@v4
+
+      - name: Set the version string for the program
+        run: |
+          VERSION="$(grep -E -o -m 1 '[0-9]+\.[0-9]+\.[0-9]+(\-[a-z]+[0-9]+)?' Changelog)";
+          echo "VERSION=$VERSION";
+          echo "PROG_VERSION=VERSION" >> $GITHUB_ENV;
+
+      - name: Print version
+        run: |
+          echo "PROG_VERSION=${{ env.PROG_VERSION }}"
+
+      - name: Create Zip SRC
+        continue-on-error: true
+        uses: deep-soft/zip-release@v2
+        with:
+          type: 'zip'
+          filename: '${{ env.PROG_NAME }}-${{ env.PROG_VERSION }}-src-x86_64-mingw.zip'
+          directory: '.'
+          exclusions: '*.map *.pdb'
+          recursive_exclusions: '*.map *.pdb'
+          path: '*'
+          env_variable: 'ZIP_SRC_ARCHIVE'
+
+      - name: Build with ${{ matrix.cc }}
+        if: ${{ matrix.cc }} == 'clang' || ${{ matrix.cc }} == 'gcc'
+        continue-on-error: true
+        run: |
+          make sslscan
+          make static
+        env:
+          CC: ${{ matrix.cc }}
+
+      - name: Install mingw-w64
+        continue-on-error: true
+        if: ${{ matrix.cc }} == 'mingw-w64'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qq mingw-w64
+          make -f Makefile.mingw
+
+      - name: Prepare to publish
+        run: |
+          mkdir out_release/
+          cp sslscan.exe out_release/
+          cp Changelog out_release/
+          ls -la out_release/
+
+      - name: Create Zip Archive Release
+        uses: deep-soft/zip-release@v2
+        with:
+          type: 'zip'
+          filename: '${{ env.PROG_NAME }}-${{ env.PROG_VERSION }}-x86_64-${{ matrix.cc }}.zip'
+          directory: 'out'
+          exclusions: '*.map *.pdb'
+          recursive_exclusions: '*.map *.pdb'
+          path: '*'
+          env_variable: 'ZIP_RELEASE_ARCHIVE'
+
+      - name: Publish
+        uses: deep-soft/action-gh-release@v2.1
+        with:
+          tag_name: ${{ env.TAG_NAME }}-${{ env.TAG_VERSION }}
+          files: |
+            ${{ env.ZIP_RELEASE_ARCHIVE }}
+            ${{ env.ZIP_SRC_ARCHIVE }}
