@@ -43,13 +43,14 @@ jobs:
 
       - name: Create Zip SRC
         continue-on-error: true
-        uses: deep-soft/zip-release@v2
+        uses: deep-soft/zip-release@v2.2
         with:
           type: 'zip'
           filename: '${{ env.PROG_NAME }}-${{ env.PROG_VERSION }}-src-x86_64-mingw.zip'
           directory: '.'
           exclusions: '*.map *.pdb'
           recursive_exclusions: '*.map *.pdb'
+          ignore_git: 'no'
           path: '*'
           env_variable: 'ZIP_ARCHIVE_SRC'
 
@@ -79,17 +80,19 @@ jobs:
           # else
           #   cp sslscan out_release/
           # fi
+          cp sslscan.1 out_release/;
           cp Changelog out_release/;
           ls -la out_release/;
 
       - name: Create Zip Archive Release
-        uses: deep-soft/zip-release@v2
+        uses: deep-soft/zip-release@v2.2
         with:
           type: 'zip'
           filename: '${{ env.PROG_NAME }}-${{ env.PROG_VERSION }}-x86_64-${{ matrix.job.cc }}.zip'
           directory: 'out_release'
           exclusions: '*.map *.pdb'
           recursive_exclusions: '*.map *.pdb'
+          ignore_git: 'yes'
           path: '*'
           env_variable: 'ZIP_ARCHIVE_RELEASE'
 
