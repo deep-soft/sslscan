@@ -19,7 +19,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cc: [clang, gcc, mingw-w64]
+        job:
+          - { cc: clang,     prog_name: 'sslscan'     }
+          - { cc: gcc,       prog_name: 'sslscan'     }
+          - { cc: mingw-w64, prog_name: 'sslscan.exe' }
     steps:
       - name: checkout
         uses: deep-soft/checkout@v4
@@ -44,20 +47,20 @@ jobs:
           exclusions: '*.map *.pdb'
           recursive_exclusions: '*.map *.pdb'
           path: '*'
-          env_variable: 'ZIP_SRC_ARCHIVE'
+          env_variable: 'ZIP_ARCHIVE_SRC'
 
-      - name: Build with ${{ matrix.cc }}
-        if: ${{ matrix.cc == 'clang' || matrix.cc == 'gcc' }}
+      - name: Build with ${{ matrix.job.cc }}
+        if: ${{ matrix.job.cc == 'clang' || matrix.job.cc == 'gcc' }}
         continue-on-error: true
         run: |
           make sslscan
           make static
         env:
-          CC: ${{ matrix.cc }}
+          CC: ${{ matrix.job.cc }}
 
       - name: Install mingw-w64
         continue-on-error: true
-        if: ${{ matrix.cc == 'mingw-w64' }}
+        if: ${{ matrix.job.cc == 'mingw-w64' }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -qq mingw-w64
@@ -65,26 +68,31 @@ jobs:
 
       - name: Prepare to publish
         run: |
-          mkdir out_release/
-          cp sslscan.exe out_release/
-          cp Changelog out_release/
-          ls -la out_release/
+          mkdir out_release/;
+          cp ${{ matrix.job.prog_name }} out_release/;
+          # if [[ ${{ matrix.job.cc }} == 'mingw-w64' ]]; then
+          #   cp sslscan.exe out_release/
+          # else
+          #   cp sslscan out_release/
+          # fi
+          cp Changelog out_release/;
+          ls -la out_release/;
 
       - name: Create Zip Archive Release
         uses: deep-soft/zip-release@v2
         with:
           type: 'zip'
-          filename: '${{ env.PROG_NAME }}-${{ env.PROG_VERSION }}-x86_64-${{ matrix.cc }}.zip'
+          filename: '${{ env.PROG_NAME }}-${{ env.PROG_VERSION }}-x86_64-${{ matrix.job.cc }}.zip'
           directory: 'out_release'
           exclusions: '*.map *.pdb'
           recursive_exclusions: '*.map *.pdb'
           path: '*'
-          env_variable: 'ZIP_RELEASE_ARCHIVE'
+          env_variable: 'ZIP_ARCHIVE_RELEASE'
 
       - name: Publish
         uses: deep-soft/action-gh-release@v2.1
         with:
           tag_name: ${{ env.TAG_NAME }}-${{ env.TAG_VERSION }}
           files: |
-            ${{ env.ZIP_RELEASE_ARCHIVE }}
-            ${{ env.ZIP_SRC_ARCHIVE }}
+            ${{ env.ZIP_ARCHIVE_RELEASE }}
+            ${{ env.ZIP_ARCHIVE_SRC }}
