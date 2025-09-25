@@ -128,26 +128,13 @@
 
 #include "sslscan.h"
 
-#if OPENSSL_VERSION_NUMBER < 0x1010100fL
-#error "OpenSSL v1.1.1 or later is required!"
+#if OPENSSL_VERSION_NUMBER < 0x30500000L
+#error "OpenSSL 3.5 or later is required!"
 #endif
 
-/* Borrowed from tortls.c to dance with OpenSSL on many platforms, with
- * many versions and releases of OpenSSL. */
-/** Does the run-time openssl version look like we need
- * SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION? */
-static int use_unsafe_renegotiation_op = 0;
-
-/** Does the run-time openssl version look like we need
- * SSL3_FLAGS_ALLOW_UNSAFE_LEGACY_RENEGOTIATION? */
-static int use_unsafe_renegotiation_flag = 0;
 
 /** Does output xml to stdout? */
 static int xml_to_stdout = 0;
-
-#if OPENSSL_VERSION_NUMBER < 0x1000100L
-unsigned long SSL_CIPHER_get_id(const SSL_CIPHER* cipher) { return cipher->id; }
-#endif
 
 const char *inet_ntop(int af, const void *src, char *dst, socklen_t size);
 
@@ -808,16 +795,8 @@ int loadCerts(struct sslCheckOptions *options)
             {
                 if (!SSL_CTX_use_PrivateKey_file(options->ctx, options->privateKeyFile, SSL_FILETYPE_ASN1))
                 {
-                    // Why would the more specific functions succeed if the generic functions failed?
-                    // -- I'm guessing that the original author was hopeful? - io
-                    if (!SSL_CTX_use_RSAPrivateKey_file(options->ctx, options->privateKeyFile, SSL_FILETYPE_PEM))
-                    {
-                        if (!SSL_CTX_use_RSAPrivateKey_file(options->ctx, options->privateKeyFile, SSL_FILETYPE_ASN1))
-                        {
-                            printf("%s    Could not configure private key.%s\n", COL_RED, RESET);
-                            status = 0;
-                        }
-                    }
+                    printf("%s    Could not configure private key.%s\n", COL_RED, RESET);
+                    status = 0;
                 }
             }
         }
@@ -920,44 +899,6 @@ int freeRenegotiationOutput( struct renegotiationOutput *myRenOut )
     return true;
 }
 
-void tls_reneg_init(struct sslCheckOptions *options)
-{
-    /* Borrowed from tortls.c to dance with OpenSSL on many platforms, with
-     * many versions and release of OpenSSL. */
-    SSL_library_init();
-    SSL_load_error_strings();
-
-    long version = SSLeay();
-    if (version >= 0x009080c0L && version < 0x009080d0L) {
-        printf_verbose("OpenSSL %s looks like version 0.9.8l; I will try SSL3_FLAGS to enable renegotiation.\n",
-            SSLeay_version(SSLEAY_VERSION));
-        use_unsafe_renegotiation_flag = 1;
-        use_unsafe_renegotiation_op = 1;
-    } else if (version >= 0x009080d0L) {
-        printf_verbose("OpenSSL %s looks like version 0.9.8m or later; "
-            "I will try SSL_OP to enable renegotiation\n",
-        SSLeay_version(SSLEAY_VERSION));
-        use_unsafe_renegotiation_op = 1;
-    } else if (version < 0x009080c0L) {
-        printf_verbose("OpenSSL %s [%lx] looks like it's older than "
-            "0.9.8l, but some vendors have backported 0.9.8l's "
-            "renegotiation code to earlier versions, and some have "
-            "backported the code from 0.9.8m or 0.9.8n.  I'll set both "
-            "SSL3_FLAGS and SSL_OP just to be safe.\n",
-            SSLeay_version(SSLEAY_VERSION), version);
-        use_unsafe_renegotiation_flag = 1;
-        use_unsafe_renegotiation_op = 1;
-    } else {
-        printf_verbose("OpenSSL %s has version %lx\n",
-            SSLeay_version(SSLEAY_VERSION), version);
-    }
-
-#ifdef SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
-  SSL_CTX_set_options(options->ctx,
-                      SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION);
-#endif
-}
-
 // Check if the server supports compression
 int testCompression(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
 {
@@ -974,7 +915,6 @@ int testCompression(struct sslCheckOptions *options, const SSL_METHOD *sslMethod
     {
         // Setup Context Object...
         options->ctx = new_CTX(sslMethod);
-        tls_reneg_init(options);
         if (options->ctx != NULL)
         {
             if (SSL_CTX_set_cipher_list(options->ctx, CIPHERSUITE_LIST_ALL) != 0)
@@ -989,11 +929,9 @@ int testCompression(struct sslCheckOptions *options, const SSL_METHOD *sslMethod
                     // Create SSL object...
                     ssl = new_SSL(options->ctx);
 
-#if ( OPENSSL_VERSION_NUMBER > 0x009080cfL )
                     // Make sure we can connect to insecure servers
                     // OpenSSL is going to change the default at a later date
                     SSL_set_options(ssl, SSL_OP_LEGACY_SERVER_CONNECT);
-#endif
 
 #ifdef SSL_OP_NO_COMPRESSION
                     // Make sure to clear the no compression flag
@@ -1008,10 +946,8 @@ int testCompression(struct sslCheckOptions *options, const SSL_METHOD *sslMethod
                         // Connect SSL and BIO
                         SSL_set_bio(ssl, cipherConnectionBio, cipherConnectionBio);
 
-#if OPENSSL_VERSION_NUMBER >= 0x0090806fL && !defined(OPENSSL_NO_TLSEXT)
                         // This enables TLS SNI
                         SSL_set_tlsext_host_name(ssl, options->sniname);
-#endif
 
                         // Connect SSL over socket
                         SSL_connect(ssl);
@@ -1082,7 +1018,6 @@ int testCompression(struct sslCheckOptions *options, const SSL_METHOD *sslMethod
     return status;
 }
 
-#ifdef SSL_MODE_SEND_FALLBACK_SCSV
 // Check for TLS_FALLBACK_SCSV
 int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
 {
@@ -1109,7 +1044,6 @@ int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
     {
         // Setup Context Object...
         options->ctx = new_CTX(sslMethod);
-        tls_reneg_init(options);
         if (options->ctx != NULL)
         {
             if (downgraded)
@@ -1128,11 +1062,9 @@ int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
                     // Create SSL object...
                     ssl = new_SSL(options->ctx);
 
-#if ( OPENSSL_VERSION_NUMBER > 0x009080cfL )
                     // Make sure we can connect to insecure servers
                     // OpenSSL is going to change the default at a later date
                     SSL_set_options(ssl, SSL_OP_LEGACY_SERVER_CONNECT);
-#endif
 
 #ifdef SSL_OP_NO_COMPRESSION
                     // Make sure to clear the no compression flag
@@ -1147,10 +1079,8 @@ int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
                         // Connect SSL and BIO
                         SSL_set_bio(ssl, cipherConnectionBio, cipherConnectionBio);
 
-#if OPENSSL_VERSION_NUMBER >= 0x0090806fL && !defined(OPENSSL_NO_TLSEXT)
                         // This enables TLS SNI
                         SSL_set_tlsext_host_name(ssl, options->sniname);
-#endif
 
                         // Connect SSL over socket
                         connStatus = SSL_connect(ssl);
@@ -1256,7 +1186,6 @@ int testFallback(struct sslCheckOptions *options,  const SSL_METHOD *sslMethod)
     }
     return status;
 }
-#endif
 
 
 // Check if the server supports renegotiation
@@ -1279,7 +1208,6 @@ int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMeth
 
         // Setup Context Object...
         options->ctx = new_CTX(sslMethod);
-        tls_reneg_init(options);
         if (options->ctx != NULL)
         {
             if (SSL_CTX_set_cipher_list(options->ctx, CIPHERSUITE_LIST_ALL) != 0)
@@ -1294,11 +1222,9 @@ int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMeth
                     // Create SSL object...
                     ssl = new_SSL(options->ctx);
 
-#if ( OPENSSL_VERSION_NUMBER > 0x009080cfL )
                     // Make sure we can connect to insecure servers
                     // OpenSSL is going to change the default at a later date
                     SSL_set_options(ssl, SSL_OP_LEGACY_SERVER_CONNECT);
-#endif
 
                    if (ssl != NULL)
                     {
@@ -1308,7 +1234,6 @@ int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMeth
                         // Connect SSL and BIO
                         SSL_set_bio(ssl, cipherConnectionBio, cipherConnectionBio);
 
-#if OPENSSL_VERSION_NUMBER >= 0x0090806fL && !defined(OPENSSL_NO_TLSEXT)
                         // This enables TLS SNI
                         // Based on http://does-not-exist.org/mail-archives/mutt-dev/msg13045.html
                         // TLS Virtual-hosting requires that the server present the correct
@@ -1322,29 +1247,18 @@ int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMeth
                         // has worked fine in other projects to which the contributor has added it,
                         // or HTTP usage.
                         SSL_set_tlsext_host_name(ssl, options->sniname);
-#endif
 
                         // Connect SSL over socket
                         cipherStatus = SSL_connect(ssl);
 
                       /* Yes, we know what we are doing here.  No, we do not treat a renegotiation
                        * as authenticating any earlier-received data. */
-/*                      if (use_unsafe_renegotiation_flag) {
-                        printf_verbose("use_unsafe_renegotiation_flag\n");
-			SSL_CTX_set_options(ssl,SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
-			SSL3_FLAGS_ALLOW_UNSAFE_LEGACY_RENEGOTIATION??
-                      } */
-                      if (use_unsafe_renegotiation_op) {
-                        printf_verbose("use_unsafe_renegotiation_op\n");
                         SSL_set_options(ssl,
                                         SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
-                      }
-
 
                         if (cipherStatus == 1)
                         {
 
-#if ( OPENSSL_VERSION_NUMBER > 0x009080cfL )
                             // SSL_get_secure_renegotiation_support() appeared first in OpenSSL 0.9.8m
                             printf_verbose("Attempting secure_renegotiation_support()\n");
                             renOut->secure = SSL_get_secure_renegotiation_support(ssl);
@@ -1357,7 +1271,6 @@ int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMeth
                             }
                             else
                             {
-#endif
                                 // We can't assume that just because the secure renegotiation
                                 // support failed the server doesn't support insecure renegotiations
 
@@ -1390,9 +1303,7 @@ int testRenegotiation(struct sslCheckOptions *options, const SSL_METHOD *sslMeth
                                     status = false;
                                     renOut->secure = false;
                                 }
-#if ( OPENSSL_VERSION_NUMBER > 0x009080cfL )
                             }
-#endif
                             // Disconnect SSL over socket
                             SSL_shutdown(ssl);
                         }
@@ -1447,12 +1358,10 @@ const char* printableSslMethod(const SSL_METHOD *sslMethod)
 {
     if (sslMethod == TLSv1_client_method())
         return "TLSv1.0";
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
     if (sslMethod == TLSv1_1_client_method())
         return "TLSv1.1";
     if (sslMethod == TLSv1_2_client_method())
         return "TLSv1.2";
-#endif
     if (sslMethod == TLSv1_3_client_method())
         return "TLSv1.3";
     return "unknown SSL_METHOD";
@@ -1479,7 +1388,6 @@ int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
         {
             hello[10] = 0x01;
         }
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
         else if (sslMethod == TLSv1_1_client_method())
         {
             hello[10] = 0x02;
@@ -1488,7 +1396,6 @@ int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
         {
             hello[10] = 0x03;
         }
-#endif
         else if (sslMethod == TLSv1_3_client_method())
         {
             hello[10] = 0x03;
@@ -1504,7 +1411,6 @@ int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
         {
             hb[2] = 0x01;
         }
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
         else if (sslMethod == TLSv1_1_client_method())
         {
             hb[2] = 0x02;
@@ -1513,7 +1419,6 @@ int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
         {
             hb[2] = 0x03;
         }
-#endif
         else if (sslMethod == TLSv1_3_client_method())
         {
             hb[2] = 0x03;
@@ -1589,17 +1494,17 @@ int testHeartbleed(struct sslCheckOptions *options, const SSL_METHOD *sslMethod)
 
 int ssl_print_tmp_key(struct sslCheckOptions *options, SSL *s)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L && !defined(LIBRESSL_VERSION_NUMBER)
+#ifndef LIBRESSL_VERSION_NUMBER
     EVP_PKEY *key;
     if (!SSL_get_server_tmp_key(s, &key))
         return 1;
     switch (EVP_PKEY_id(key)) {
     case EVP_PKEY_RSA:
-        if (EVP_PKEY_bits(key) <= 768)
+        if (EVP_PKEY_bits(key) <= 1024)
         {
             printf(" RSA %s%d%s bits", COL_RED, EVP_PKEY_bits(key), RESET);
         }
-        else if (EVP_PKEY_bits(key) <= 1024)
+        else if (EVP_PKEY_bits(key) <= 2048)
         {
             printf(" RSA %s%d%s bits", COL_YELLOW, EVP_PKEY_bits(key), RESET);
         }
@@ -1610,11 +1515,11 @@ int ssl_print_tmp_key(struct sslCheckOptions *options, SSL *s)
         break;
 
     case EVP_PKEY_DH:
-        if (EVP_PKEY_bits(key) <= 768)
+        if (EVP_PKEY_bits(key) <= 1024)
         {
             printf(" DHE %s%d%s bits", COL_RED, EVP_PKEY_bits(key), RESET);
         }
-        else if (EVP_PKEY_bits(key) <= 1024)
+        else if (EVP_PKEY_bits(key) < 2048)
         {
             printf(" DHE %s%d%s bits", COL_YELLOW, EVP_PKEY_bits(key), RESET);
         }
@@ -1651,8 +1556,9 @@ int ssl_print_tmp_key(struct sslCheckOptions *options, SSL *s)
     }
     EVP_PKEY_free(key);
     return 1;
-#endif
+#else
     return 0;
+#endif
 }
 
 int setCipherSuite(struct sslCheckOptions *options, const SSL_METHOD *sslMethod, const char *str)
@@ -1723,10 +1629,6 @@ void outputCipher(struct sslCheckOptions *options, SSL *ssl, const char *cleanSs
     // Short authentication tag length
     // These are flagged as 64 bit strength in newer versions of OpenSSL
     // But in older versions they'll still show as 256 bits, so override that here
-    // See https://github.com/openssl/openssl/pull/16652
-    if (strstr(ciphername, "CCM8")) {
-        cipherbits = 64;
-    }
 
     if (cipherbits < 10)
       tempInt = 2;
@@ -1737,10 +1639,10 @@ void outputCipher(struct sslCheckOptions *options, SSL *ssl, const char *cleanSs
       printf("%s??%s bits  ", COL_YELLOW, RESET);
     } else if (cipherbits == 0) {
       printf("%s%d%s bits  ", COL_RED_BG, cipherbits, RESET);
+    } else if (cipherbits == 112) {
+      printf("%s%d%s bits  ", COL_YELLOW, cipherbits, RESET);
     } else if (cipherbits >= 112) {
       printf("%s%d%s bits  ", COL_GREEN, cipherbits, RESET);
-    } else if (cipherbits > 56) {
-      printf("%s%d%s bits  ", COL_YELLOW, cipherbits, RESET);
     } else
       printf("%s%d%s bits  ", COL_RED, cipherbits, RESET);
 
@@ -1764,10 +1666,10 @@ void outputCipher(struct sslCheckOptions *options, SSL *ssl, const char *cleanSs
         strength = "null";
     } else if (strstr(ciphername, "ADH") || strstr(ciphername, "AECDH") || strstr(ciphername, "_anon_")) {
         if (options->ianaNames) {
-            printf("%s%-45s%s", COL_PURPLE, ciphername, RESET);
+            printf("%s%-45s%s", COL_RED_BG, ciphername, RESET);
         }
         else {
-            printf("%s%-29s%s", COL_PURPLE, ciphername, RESET);
+            printf("%s%-29s%s", COL_RED_BG, ciphername, RESET);
         }
         strength = "anonymous";
     } else if (strstr(ciphername, "EXP")) {
@@ -1778,6 +1680,15 @@ void outputCipher(struct sslCheckOptions *options, SSL *ssl, const char *cleanSs
             printf("%s%-29s%s", COL_RED, ciphername, RESET);
         }
         strength = "weak";
+    } else if (strstr(ciphername, "MD5")) {
+        /* SHA-1 isn't really exploitable in the contxt of TLS, but there's no reason to be using it any more */
+        if (options->ianaNames) {
+            printf("%s%-45s%s", COL_RED, ciphername, RESET);
+        }
+        else {
+            printf("%s%-29s%s", COL_RED, ciphername, RESET);
+        }
+        strength = "medium";
     } else if (strstr(ciphername, "RC4") || strstr(ciphername, "DES")) {
         if (options->ianaNames) {
             printf("%s%-45s%s", COL_YELLOW, ciphername, RESET);
@@ -1786,32 +1697,32 @@ void outputCipher(struct sslCheckOptions *options, SSL *ssl, const char *cleanSs
             printf("%s%-29s%s", COL_YELLOW, ciphername, RESET);
         }
         strength = "medium";
-    } else if (strstr(ciphername, "CCM8")) {
+    } else if (strstr(ciphername, "CCM8") || strstr(ciphername, "CCM_8")) {
         // Short authentication tag length
         // These are flagged as 64 bit strength in newer versions of OpenSSL
         // But in older versions they'll still show as 256 bits, so manually flag them here
         // See https://github.com/openssl/openssl/pull/16652
         if (options->ianaNames) {
-            printf("%s%-45s%s", COL_YELLOW, ciphername, RESET);
+            printf("%s%-45s%s", COL_RED, ciphername, RESET);
         }
         else {
-            printf("%s%-29s%s", COL_YELLOW, ciphername, RESET);
+            printf("%s%-29s%s", COL_RED, ciphername, RESET);
         }
         strength = "medium";
     } else if (strstr(ciphername, "_SM4_")) { /* Developed by Chinese government */
         if (options->ianaNames) {
-            printf("%s%-45s%s", COL_YELLOW, ciphername, RESET);
+            printf("%s%-45s%s", COL_RED, ciphername, RESET);
         }
         else {
-            printf("%s%-29s%s", COL_YELLOW, ciphername, RESET);
+            printf("%s%-29s%s", COL_RED, ciphername, RESET);
         }
         strength = "medium";
     } else if (strstr(ciphername, "_GOSTR341112_")) { /* Developed by Russian government */
         if (options->ianaNames) {
-            printf("%s%-45s%s", COL_YELLOW, ciphername, RESET);
+            printf("%s%-45s%s", COL_RED, ciphername, RESET);
         }
         else {
-            printf("%s%-29s%s", COL_YELLOW, ciphername, RESET);
+            printf("%s%-29s%s", COL_RED, ciphername, RESET);
         }
         strength = "medium";
     } else if ((strstr(ciphername, "CHACHA20") || (strstr(ciphername, "GCM"))) && (strstr(ciphername, "DHE") || (strcmp(cleanSslMethod, "TLSv1.3") == 0))) {
@@ -1822,6 +1733,15 @@ void outputCipher(struct sslCheckOptions *options, SSL *ssl, const char *cleanSs
             printf("%s%-29s%s", COL_GREEN, ciphername, RESET);
         }
         strength = "strong";
+    } else if (strstr(ciphername, "SHA") && !(strstr(ciphername, "SHA256") || strstr(ciphername, "SHA384"))) {
+        /* SHA-1 isn't really exploitable in the contxt of TLS, but there's no reason to be using it any more */
+        if (options->ianaNames) {
+            printf("%s%-45s%s", COL_YELLOW, ciphername, RESET);
+        }
+        else {
+            printf("%s%-29s%s", COL_YELLOW, ciphername, RESET);
+        }
+        strength = "medium";
     } else {
         if (options->ianaNames) {
             printf("%-45s", ciphername);
@@ -2042,7 +1962,6 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                         // Connect SSL and BIO
                         SSL_set_bio(ssl, cipherConnectionBio, cipherConnectionBio);
 
-#if OPENSSL_VERSION_NUMBER >= 0x0090806fL && !defined(OPENSSL_NO_TLSEXT)
                         // Based on http://does-not-exist.org/mail-archives/mutt-dev/msg13045.html
                         // TLS Virtual-hosting requires that the server present the correct
                         // certificate; to do this, the ServerNameIndication TLS extension is used.
@@ -2055,7 +1974,6 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                         // has worked fine in other projects to which the contributor has added it,
                         // or HTTP usage.
                         SSL_set_tlsext_host_name (ssl, options->sniname);
-#endif
 
                         // Against some servers, this is required for a successful SSL_connect(), below.
                         SSL_set_options(ssl, SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
@@ -2074,7 +1992,7 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                         }
 
                         // Get Certificate...
-                        x509Cert = SSL_get_peer_certificate(ssl);
+                        x509Cert = SSL_get1_peer_certificate(ssl);
                         if (x509Cert != NULL)
                         {
                             printf("\n  %sSSL Certificate:%s\n", COL_BLUE, RESET);
@@ -2231,7 +2149,7 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                                 {
                                     e = X509_NAME_get_entry(subj, cnindex);
                                     d = X509_NAME_ENTRY_get_data(e);
-                                    subject = (char *) ASN1_STRING_data(d);
+                                    subject = (const char *) ASN1_STRING_get0_data(d);
                                     printf("Subject:  %s\n", subject);
                                     printf_xml("   <subject><![CDATA[%s]]></subject>\n", subject);
                                 }
@@ -2293,7 +2211,7 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                                 {
                                     e = X509_NAME_get_entry(subj, cnindex);
                                     d = X509_NAME_ENTRY_get_data(e);
-                                    issuer = (char *) ASN1_STRING_data(d);
+                                    issuer = (const char *) ASN1_STRING_get0_data(d);
 
                                     // If issuer is same as hostname we scanned or is *, flag as self-signed
                                     if (
@@ -2322,7 +2240,7 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                             ptime = NULL;
 
                             printf("\nNot valid before: ");
-                            timediff = X509_cmp_time(X509_get_notBefore(x509Cert), ptime);
+                            timediff = X509_cmp_time(X509_get0_notBefore(x509Cert), ptime);
                             // Certificate isn't valid yet
                             if (timediff > 0)
                             {
@@ -2332,12 +2250,12 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                             {
                                 printf("%s", COL_GREEN);
                             }
-                            ASN1_TIME_print(stdoutBIO, X509_get_notBefore(x509Cert));
+                            ASN1_TIME_print(stdoutBIO, X509_get0_notBefore(x509Cert));
                             printf("%s", RESET);
 
                             if (options->xmlOutput) {
                                 printf_xml("   <not-valid-before>");
-                                ASN1_TIME_print(fileBIO, X509_get_notBefore(x509Cert));
+                                ASN1_TIME_print(fileBIO, X509_get0_notBefore(x509Cert));
                                 printf_xml("</not-valid-before>\n");
                                 if (timediff > 0)
                                 {
@@ -2350,7 +2268,7 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                             }
 
                             printf("\nNot valid after:  ");
-                            timediff = X509_cmp_time(X509_get_notAfter(x509Cert), ptime);
+                            timediff = X509_cmp_time(X509_get0_notAfter(x509Cert), ptime);
                             // Certificate has expired
                             if (timediff < 0)
                             {
@@ -2360,11 +2278,11 @@ int checkCertificate(struct sslCheckOptions *options, const SSL_METHOD *sslMetho
                             {
                                 printf("%s", COL_GREEN);
                             }
-                            ASN1_TIME_print(stdoutBIO, X509_get_notAfter(x509Cert));
+                            ASN1_TIME_print(stdoutBIO, X509_get0_notAfter(x509Cert));
                             printf("%s", RESET);
                             if (options->xmlOutput) {
                                 printf_xml("   <not-valid-after>");
-                                ASN1_TIME_print(fileBIO, X509_get_notAfter(x509Cert));
+                                ASN1_TIME_print(fileBIO, X509_get0_notAfter(x509Cert));
                                 printf_xml("</not-valid-after>\n");
                                 if (timediff < 0)
                                 {
@@ -2454,7 +2372,6 @@ int ocspRequest(struct sslCheckOptions *options)
             printf_verbose("sslMethod = SSLv23_method()");
             sslMethod = SSLv23_method();
         }
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
         else if( options->sslVersion == tls_v11) {
             printf_verbose("sslMethod = TLSv1_1_method()");
             sslMethod = TLSv1_1_method();
@@ -2463,7 +2380,6 @@ int ocspRequest(struct sslCheckOptions *options)
             printf_verbose("sslMethod = TLSv1_2_method()");
             sslMethod = TLSv1_2_method();
         }
-#endif
         else if( options->sslVersion == tls_v13) {
             printf_verbose("sslMethod = TLSv1_3_method()");
             sslMethod = TLSv1_3_method();
@@ -2494,7 +2410,6 @@ int ocspRequest(struct sslCheckOptions *options)
                         // Connect SSL and BIO
                         SSL_set_bio(ssl, cipherConnectionBio, cipherConnectionBio);
 
-#if OPENSSL_VERSION_NUMBER >= 0x0090806fL && !defined(OPENSSL_NO_TLSEXT)
                         // Based on http://does-not-exist.org/mail-archives/mutt-dev/msg13045.html
                         // TLS Virtual-hosting requires that the server present the correct
                         // certificate; to do this, the ServerNameIndication TLS extension is used.
@@ -2507,11 +2422,10 @@ int ocspRequest(struct sslCheckOptions *options)
                         // has worked fine in other projects to which the contributor has added it,
                         // or HTTP usage.
                         SSL_set_tlsext_host_name (ssl, options->sniname);
-#endif
-						SSL_set_tlsext_status_type(ssl, TLSEXT_STATUSTYPE_ocsp);
-						SSL_CTX_set_tlsext_status_cb(options->ctx, ocsp_resp_cb);
+			SSL_set_tlsext_status_type(ssl, TLSEXT_STATUSTYPE_ocsp);
+			SSL_CTX_set_tlsext_status_cb(options->ctx, ocsp_resp_cb);
                         
-						// Connect SSL over socket
+			// Connect SSL over socket
                         cipherStatus = SSL_connect(ssl);
                         if (cipherStatus == 1)
                         {
@@ -2765,7 +2679,6 @@ int showCertificate(struct sslCheckOptions *options)
             printf_verbose("sslMethod = SSLv23_method()");
             sslMethod = SSLv23_method();
         }
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
         else if( options->sslVersion == tls_v11) {
             printf_verbose("sslMethod = TLSv1_1_method()");
             sslMethod = TLSv1_1_method();
@@ -2778,7 +2691,6 @@ int showCertificate(struct sslCheckOptions *options)
             printf_verbose("sslMethod = TLSv1_3_method()");
             sslMethod = TLSv1_3_method();
         }
-#endif
         else {
             printf_verbose("sslMethod = TLS_method()\n");
             sslMethod = TLS_method();
@@ -2804,7 +2716,6 @@ int showCertificate(struct sslCheckOptions *options)
                         // Connect SSL and BIO
                         SSL_set_bio(ssl, cipherConnectionBio, cipherConnectionBio);
 
-#if OPENSSL_VERSION_NUMBER >= 0x0090806fL && !defined(OPENSSL_NO_TLSEXT)
                         // Based on http://does-not-exist.org/mail-archives/mutt-dev/msg13045.html
                         // TLS Virtual-hosting requires that the server present the correct
                         // certificate; to do this, the ServerNameIndication TLS extension is used.
@@ -2817,7 +2728,6 @@ int showCertificate(struct sslCheckOptions *options)
                         // has worked fine in other projects to which the contributor has added it,
                         // or HTTP usage.
                         SSL_set_tlsext_host_name (ssl, options->sniname);
-#endif
 
                         // Connect SSL over socket
                         cipherStatus = SSL_connect(ssl);
@@ -2843,7 +2753,7 @@ int showCertificate(struct sslCheckOptions *options)
                             }
                             else
                             {                                
-                                X509 *peerCertificate = SSL_get_peer_certificate(ssl);
+                                X509 *peerCertificate = SSL_get1_peer_certificate(ssl);
                                 certificatesChain = sk_X509_new_null();
                                 sk_X509_push(certificatesChain, peerCertificate);
                             }
@@ -2981,20 +2891,20 @@ int showCertificate(struct sslCheckOptions *options)
                                     if (!(X509_FLAG_COMPAT & X509_FLAG_NO_VALIDITY))
                                     {
                                         printf("    Not valid before: ");
-                                        ASN1_TIME_print(stdoutBIO, X509_get_notBefore(x509Cert));
+                                        ASN1_TIME_print(stdoutBIO, X509_get0_notBefore(x509Cert));
                                         if (options->xmlOutput)
                                         {
                                             printf_xml("   <not-valid-before>");
-                                            ASN1_TIME_print(fileBIO, X509_get_notBefore(x509Cert));
+                                            ASN1_TIME_print(fileBIO, X509_get0_notBefore(x509Cert));
                                             printf_xml("</not-valid-before>\n");
                                         }
                                         printf("\n    Not valid after: ");
-                                        ASN1_TIME_print(stdoutBIO, X509_get_notAfter(x509Cert));
+                                        ASN1_TIME_print(stdoutBIO, X509_get0_notAfter(x509Cert));
                                         printf("\n");
                                         if (options->xmlOutput)
                                         {
                                             printf_xml("   <not-valid-after>");
-                                            ASN1_TIME_print(fileBIO, X509_get_notAfter(x509Cert));
+                                            ASN1_TIME_print(fileBIO, X509_get0_notAfter(x509Cert));
                                             printf_xml("</not-valid-after>\n");
                                         }
                                     }
@@ -3235,7 +3145,6 @@ int showTrustedCAs(struct sslCheckOptions *options)
             printf_verbose("sslMethod = SSLv23_method()");
             sslMethod = SSLv23_method();
         }
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
         else if( options->sslVersion == tls_v11) {
             printf_verbose("sslMethod = TLSv1_1_method()");
             sslMethod = TLSv1_1_method();
@@ -3248,7 +3157,6 @@ int showTrustedCAs(struct sslCheckOptions *options)
             printf_verbose("sslMethod = TLSv1_3_method()");
             sslMethod = TLSv1_3_method();
         }
-#endif
         else {
             printf_verbose("sslMethod = TLS_method()\n");
             sslMethod = TLS_method();
@@ -3274,7 +3182,6 @@ int showTrustedCAs(struct sslCheckOptions *options)
                         // Connect SSL and BIO
                         SSL_set_bio(ssl, cipherConnectionBio, cipherConnectionBio);
 
-#if OPENSSL_VERSION_NUMBER >= 0x0090806fL && !defined(OPENSSL_NO_TLSEXT)
                         // Based on http://does-not-exist.org/mail-archives/mutt-dev/msg13045.html
                         // TLS Virtual-hosting requires that the server present the correct
                         // certificate; to do this, the ServerNameIndication TLS extension is used.
@@ -3287,7 +3194,6 @@ int showTrustedCAs(struct sslCheckOptions *options)
                         // has worked fine in other projects to which the contributor has added it,
                         // or HTTP usage.
                         SSL_set_tlsext_host_name (ssl, options->sniname);
-#endif
 
                         // Connect SSL over socket
                         cipherStatus = SSL_connect(ssl);
@@ -3593,32 +3499,21 @@ int testHost(struct sslCheckOptions *options)
         switch (options->sslVersion)
         {
             case ssl_all:
-                populateCipherList(options, TLSv1_3_client_method());
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
-                populateCipherList(options, TLSv1_2_client_method());
-                populateCipherList(options, TLSv1_1_client_method());
-#endif
-                populateCipherList(options, TLSv1_client_method());
-                break;
             case tls_all:
                 populateCipherList(options, TLSv1_3_client_method());
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
                 populateCipherList(options, TLSv1_2_client_method());
                 populateCipherList(options, TLSv1_1_client_method());
-#endif
                 populateCipherList(options, TLSv1_client_method());
                 break;
             case tls_v13:
                 populateCipherList(options, TLSv1_3_client_method());
                 break;
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
             case tls_v12:
                 populateCipherList(options, TLSv1_2_client_method());
                 break;
             case tls_v11:
                 populateCipherList(options, TLSv1_1_client_method());
                 break;
-#endif
             case tls_v10:
                 populateCipherList(options, TLSv1_client_method());
                 break;
@@ -3642,12 +3537,7 @@ int testHost(struct sslCheckOptions *options)
     if (status == true && options->fallback )
     {
         printf("  %sTLS Fallback SCSV:%s\n", COL_BLUE, RESET);
-#ifdef SSL_MODE_SEND_FALLBACK_SCSV
         testFallback(options, NULL);
-#else
-        printf("%sOpenSSL version does not support SCSV fallback%s\n\n", COL_RED, RESET);
-
-#endif
     }
     if (status == true && options->reneg )
     {
@@ -3664,7 +3554,6 @@ int testHost(struct sslCheckOptions *options)
     if (status == true && options->heartbleed )
     {
         printf("  %sHeartbleed:%s\n", COL_BLUE, RESET);
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
         if ((options->sslVersion == ssl_all || options->sslVersion == tls_all || options->sslVersion == tls_v13) && options->tls13_supported)
         {
             printf("TLSv1.3 ");
@@ -3680,7 +3569,6 @@ int testHost(struct sslCheckOptions *options)
             printf("TLSv1.1 ");
             status = testHeartbleed(options, TLSv1_1_client_method());
         }
-#endif
         if ((options->sslVersion == ssl_all || options->sslVersion == tls_all || options->sslVersion == tls_v10) && options->tls10_supported)
         {
             printf("TLSv1.0 ");
@@ -3697,9 +3585,7 @@ int testHost(struct sslCheckOptions *options)
 	if (status == true && options->ocspStatus == true)
 	{
 		printf("  %sOCSP Stapling Request:%s\n", COL_BLUE, RESET);
-#if OPENSSL_VERSION_NUMBER > 0x00908000L && !defined(OPENSSL_NO_TLSEXT)
 		status = ocspRequest(options);
-#endif
 	}
 
     if (options->ciphersuites)
@@ -3899,7 +3785,6 @@ int main(int argc, char *argv[])
         return -1;
     }
 #endif
-    SSL_library_init();
 
     // Get program parameters
     for (argLoop = 1; argLoop < argc; argLoop++)
@@ -3959,11 +3844,9 @@ int main(int argc, char *argv[])
         else if (strcmp("--verbose", argv[argLoop]) == 0)
             options->verbose = true;
 
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
         // Cipher details (curve names and EDH key lengths)
         else if (strcmp("--no-cipher-details", argv[argLoop]) == 0)
             options->cipher_details = false;
-#endif
 
         // Disable coloured output
         else if ((strcmp("--no-colour", argv[argLoop]) == 0) || (strcmp("--no-color", argv[argLoop]) == 0))
@@ -4068,7 +3951,7 @@ int main(int argc, char *argv[])
         // TLS v1 only...
         else if (strcmp("--tls10", argv[argLoop]) == 0)
             options->sslVersion = tls_v10;
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
+
         // TLS v11 only...
         else if (strcmp("--tls11", argv[argLoop]) == 0)
             options->sslVersion = tls_v11;
@@ -4076,10 +3959,11 @@ int main(int argc, char *argv[])
         // TLS v12 only...
         else if (strcmp("--tls12", argv[argLoop]) == 0)
             options->sslVersion = tls_v12;
+
         // TLS v13 only...
         else if (strcmp("--tls13", argv[argLoop]) == 0)
             options->sslVersion = tls_v13;
-#endif
+
         // TLS (all versions)...
         else if (strcmp("--tlsall", argv[argLoop]) == 0)
             options->sslVersion = tls_all;
@@ -4259,21 +4143,14 @@ int main(int argc, char *argv[])
     switch (mode)
     {
         case mode_version:
-            printf("%s\t\t%s\n\t\t%s\n%s", COL_BLUE, VERSION,
-                    SSLeay_version(SSLEAY_VERSION), RESET);
-#if OPENSSL_VERSION_NUMBER < 0x10001000L
-            printf("\t\t%sOpenSSL version does not support TLSv1.1%s\n", COL_RED, RESET);
-            printf("\t\t%sTLSv1.1 ciphers will not be detected%s\n", COL_RED, RESET);
-            printf("\t\t%sOpenSSL version does not support TLSv1.2%s\n", COL_RED, RESET);
-            printf("\t\t%sTLSv1.2 ciphers will not be detected%s\n", COL_RED, RESET);
-#endif
+            printf("%s\n%s", VERSION, OpenSSL_version(OPENSSL_VERSION));
             break;
 
         case mode_help:
             // Program version banner...
             printf("%s%s%s\n", COL_BLUE, program_banner, RESET);
             printf("%s\t\t%s\n\t\t%s\n%s\n\n", COL_BLUE, VERSION,
-                    SSLeay_version(SSLEAY_VERSION), RESET);
+                    OpenSSL_version(OPENSSL_VERSION), RESET);
             printf("%sCommand:%s\n", COL_BLUE, RESET);
             printf("  %s%s [options] [host:port | host]%s\n\n", COL_GREEN, argv[0], RESET);
             printf("%sOptions:%s\n", COL_BLUE, RESET);
@@ -4296,25 +4173,19 @@ int main(int argc, char *argv[])
             printf("  %s--ssl2%s               Only check if SSLv2 is enabled\n", COL_GREEN, RESET);
             printf("  %s--ssl3%s               Only check if SSLv3 is enabled\n", COL_GREEN, RESET);
             printf("  %s--tls10%s              Only check TLSv1.0 ciphers\n", COL_GREEN, RESET);
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
             printf("  %s--tls11%s              Only check TLSv1.1 ciphers\n", COL_GREEN, RESET);
             printf("  %s--tls12%s              Only check TLSv1.2 ciphers\n", COL_GREEN, RESET);
             printf("  %s--tls13%s              Only check TLSv1.3 ciphers\n", COL_GREEN, RESET);
-#endif
             printf("  %s--tlsall%s             Only check TLS ciphers (all versions)\n", COL_GREEN, RESET);
             printf("  %s--show-ciphers%s       Show supported client ciphers\n", COL_GREEN, RESET);
             printf("  %s--show-cipher-ids%s    Show cipher ids\n", COL_GREEN, RESET);
             printf("  %s--iana-names%s         Use IANA/RFC cipher names rather than OpenSSL ones\n", COL_GREEN, RESET);
             printf("  %s--show-times%s         Show handhake times in milliseconds\n", COL_GREEN, RESET);
             printf("\n");
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
             printf("  %s--no-cipher-details%s  Disable EC curve names and EDH/RSA key lengths output\n", COL_GREEN, RESET);
-#endif
             printf("  %s--no-ciphersuites%s    Do not check for supported ciphersuites\n", COL_GREEN, RESET);
             printf("  %s--no-compression%s     Do not check for TLS compression (CRIME)\n", COL_GREEN, RESET);
-#ifdef SSL_MODE_SEND_FALLBACK_SCSV
             printf("  %s--no-fallback%s        Do not check for TLS Fallback SCSV\n", COL_GREEN, RESET);
-#endif
             printf("  %s--no-groups%s          Do not enumerate key exchange groups\n", COL_GREEN, RESET);
             printf("  %s--no-heartbleed%s      Do not check for OpenSSL Heartbleed (CVE-2014-0160)\n", COL_GREEN, RESET);
             printf("  %s--no-renegotiation%s   Do not check for TLS renegotiation\n", COL_GREEN, RESET);
@@ -4350,16 +4221,7 @@ int main(int argc, char *argv[])
         case mode_single:
         case mode_multiple:
             printf("Version: %s%s%s\n%s\n%s\n", COL_GREEN, VERSION, RESET,
-                    SSLeay_version(SSLEAY_VERSION), RESET);
-#if OPENSSL_VERSION_NUMBER < 0x10001000L
-            printf("\t\t%sOpenSSL version does not support TLSv1.1%s\n", COL_RED, RESET);
-            printf("\t\t%sTLSv1.1 ciphers will not be detected%s\n", COL_RED, RESET);
-            printf("\t\t%sOpenSSL version does not support TLSv1.2%s\n", COL_RED, RESET);
-            printf("\t\t%sTLSv1.2 ciphers will not be detected%s\n", COL_RED, RESET);
-#endif
-
-            //SSLeay_add_all_algorithms();
-            ERR_load_crypto_strings();
+                    OpenSSL_version(OPENSSL_VERSION), RESET);
 
             // Do the testing...
             if (mode == mode_single)
@@ -4909,6 +4771,49 @@ err:
 }
 
 
+/* Generates a MLKEM encapsulation key and appends it to the string.  variant field must be 512, 768, or 1024. */
+int bs_append_mlkem(unsigned int variant, bs *b) {
+
+  char *mlkem_str = NULL;
+  if (variant == 512)
+    mlkem_str = "ML-KEM-512";
+  else if (variant == 768)
+    mlkem_str = "ML-KEM-768";
+  else if (variant == 1024)
+    mlkem_str = "ML-KEM-1024";
+  else {
+    fprintf(stderr, "Unimplemented MLKEM variant: %u\n", variant);
+    return 0;
+  }
+
+  /* Generate the key. */
+  EVP_PKEY *mlkem_key = EVP_PKEY_Q_keygen(NULL, NULL, mlkem_str);
+  if (!mlkem_key) {
+    fprintf(stderr, "Failed to generate MLKEM%u key.\n", variant);
+    return 0;
+  }
+
+  /* Extract the encapsulation key. */
+  unsigned char *encap_key = NULL;
+  size_t encap_key_len = EVP_PKEY_get1_encoded_public_key(mlkem_key, &encap_key);
+
+  if ((encap_key_len == 0) || (encap_key == NULL)) {
+    fprintf(stderr, "Failed to extract encapsulation key for MLKEM%u.\n", variant);
+    EVP_PKEY_free(mlkem_key);
+    return 0;
+  }
+
+  /* Append it to the string. */
+  bs_append_bytes(b, encap_key, encap_key_len);
+
+  /* Free the keys. */
+  EVP_PKEY_free(mlkem_key);
+  OPENSSL_free(encap_key);
+
+  return 1;
+}
+
+
 /* Internal function.  Use  bs_append_x25519_pubkey() and bs_append_x448_pubkey() instead. */
 void __bs_append_xstar_pubkey(bs *b, unsigned int gen_x25519) {
   unsigned char public_key[64] = {0};  /* X25519 requires 32 bytes minimum, and X448 requires 56 bytes minimum. */
@@ -5017,56 +4922,21 @@ unsigned int checkIfTLSVersionIsSupported(struct sslCheckOptions *options, unsig
 
 
   tls_extensions = makeTLSExtensions(options, 1);
-  if (tls_version == TLSv1_3) {
-    /* Extension: supported_groups */
-    bs_append_bytes(tls_extensions, (unsigned char []) {
-      0x00, 0x0a, // Extension: supported_groups (10)
-      0x00, 0x16, // Extension Length (22)
-      0x00, 0x14, // Supported Groups List Length (20)
-      0x00, 0x17, // secp256r1
-      0x00, 0x19, // secp521r1
-      0x00, 0x18, // secp384r1
-      0x00, 0x1d, // X25519
-      0x00, 0x1e, // X448
-      0x01, 0x00, // FFDHE2048
-      0x01, 0x01, // FFDHE3072
-      0x01, 0x02, // FFDHE4096
-      0x01, 0x03, // FFDHE6144
-      0x01, 0x04, // FFDHE8192
-    }, 26);
 
-    /* Add key share for X25519. */
+  /* Add the supported_groups extension. */
+  tlsExtensionAddSupportedGroups(tls_version, tls_extensions);
+
+  if (tls_version == TLSv1_3) {
+    /* Add key share for X25519 & X25519MLKEM768. */
     tlsExtensionAddDefaultKeyShare(tls_extensions);
 
     /* Explicitly mark that this is a TLSv1.3 Client Hello. */
     tlsExtensionAddTLSv1_3(tls_extensions);
-
-    /* Update the length of the extensions. */
-    tlsExtensionUpdateLength(tls_extensions);
-  } else {
-    /* Extension: supported_groups */
-    bs_append_bytes(tls_extensions, (unsigned char []) {
-      0x00, 0x0a, // Extension: supported_groups (10)
-      0x00, 0x1c, // Extension Length (28)
-      0x00, 0x1a, // Supported Groups List Length (26)
-      0x00, 0x17, // secp256r1
-      0x00, 0x19, // secp521r1
-      0x00, 0x1c, // brainpoolP512r1
-      0x00, 0x1b, // brainpoolP384r1
-      0x00, 0x18, // secp384r1
-      0x00, 0x1a, // brainpoolP256r1
-      0x00, 0x16, // secp256k1
-      0x00, 0x0e, // sect571r1
-      0x00, 0x0d, // sect571k1
-      0x00, 0x0b, // sect409k1
-      0x00, 0x0c, // sect409r1
-      0x00, 0x09, // sect283k1
-      0x00, 0x0a, // sect283r1
-    }, 32);
-
-    /* Update the length of the extensions. */
-    tlsExtensionUpdateLength(tls_extensions);
   }
+
+  /* Update the length of the extensions. */
+  tlsExtensionUpdateLength(tls_extensions);
+
 
   ciphersuite_list = makeCiphersuiteListAll(tls_version);
   client_hello = makeClientHello(options, tls_version, ciphersuite_list, tls_extensions);
@@ -5114,6 +4984,109 @@ unsigned int checkIfTLSVersionIsSupported(struct sslCheckOptions *options, unsig
   bs_free(&tls_extensions);
   bs_free(&client_hello);
   bs_free(&server_hello);
+
+  /* If we're about to return false, let's make one last attempt using OpenSSL's built-in functions to test the protocol. Some non-standard TLS stacks don't like our ClientHello because it includes "too many" ciphersuite options (even though it is perfectly valid per the specs). */
+  if (ret == false)
+    ret = checkIfTLSVersionIsSupported_Backup(options, tls_version);
+
+  return ret;
+}
+
+/* Makes a fallback attempt to check if a TLS version is supported.  Uses OpenSSL's functions instead of building our own ClientHello.  Useful in odd cases where non-standard TLS stacks reject our valid ClientHellos. */
+unsigned int checkIfTLSVersionIsSupported_Backup(struct sslCheckOptions *options, unsigned int tls_version) {
+
+  int ret = false;
+  int version = -1;
+  const SSL_METHOD *sslMethod = NULL;
+
+  /* Determine the right client method, ciphersuite list, and TLS version we need to work with. */
+  strncpy(options->cipherstring, CIPHERSUITE_LIST_ALL, sizeof(options->cipherstring) - 1);
+  if (tls_version == TLSv1_0) {
+    sslMethod = TLSv1_client_method();
+    version = TLS1_VERSION;
+  } else if (tls_version == TLSv1_1) {
+    sslMethod = TLSv1_1_client_method();
+    version = TLS1_1_VERSION;
+  } else if (tls_version == TLSv1_2) {
+    sslMethod = TLSv1_2_client_method();
+    version = TLS1_2_VERSION;
+  } else if (tls_version == TLSv1_3) {
+    sslMethod = TLSv1_3_client_method();
+    version = TLS1_3_VERSION;
+    strncpy(options->cipherstring, TLSV13_CIPHERSUITES, sizeof(options->cipherstring) - 1);
+  }
+
+  if (sslMethod == NULL)
+    goto done;
+
+  printf_verbose("Using fallback method for checking if %s is supported.\n", getPrintableTLSName(tls_version));
+
+  /* Connect to the target host. */
+  int socketDescriptor = tcpConnect(options);
+  if (socketDescriptor == 0) {
+    printf_verbose("%s: failed to connect to target.\n", __func__);
+    goto done;
+  }
+
+  /* Create a new context. */
+  options->ctx = new_CTX(sslMethod);
+  if (options->ctx == NULL) {
+    printf_verbose("%s: failed to create context.\n", __func__);
+    goto done;
+  }
+
+  /* Set the minimum and maximum protocol versions to the same thing.  This ensures that if we connect, we're only connected with this exact TLS version. */
+  if (!SSL_CTX_set_min_proto_version(options->ctx, version)) {
+    printf_verbose("%s: failed to set minimum protocol version.\n", __func__);
+    goto done;
+  }
+
+  if (!SSL_CTX_set_max_proto_version(options->ctx, version)) {
+    printf_verbose("%s: failed to set maximum protocol version.\n", __func__);
+    goto done;
+  }
+
+  /* Set the ciphersuite string in the context. */
+  if (!setCipherSuite(options, sslMethod, options->cipherstring)) {
+    printf_verbose("%s: failed to set the ciphersuite list: [%s]\n", __func__, options->cipherstring);
+    goto done;
+  }
+
+  /* Create the SSL object. */
+  SSL *ssl = new_SSL(options->ctx);
+  if (ssl == NULL) {
+    printf_verbose("%s: failed to create SSL object.\n", __func__);
+    goto done;
+  }
+
+  /* Set the SNI. */
+  if (!SSL_set_tlsext_host_name(ssl, options->sniname)) {
+    printf_verbose("%s: failed to set SNI.\n", __func__);
+    goto done;
+  }
+
+  /* Wrap the raw socket with a new BIO. */
+  BIO *bio = BIO_new_socket(socketDescriptor, BIO_NOCLOSE);
+  if (bio == NULL) {
+    printf_verbose("%s: failed to create BIO socket.\n", __func__);
+    goto done;
+  }
+
+  SSL_set_bio(ssl, bio, bio);
+
+  /* Start the TLS handshake. */
+  int connStatus = SSL_connect(ssl);
+  if (connStatus == 1) {
+    ret = true;
+    printf_verbose("Backup connection succeeded for %s!\n", getPrintableTLSName(tls_version));
+  } else {
+    printf_verbose("%s: backup connection failed: %d\n", __func__, SSL_get_error(ssl, connStatus));
+  }
+
+ done:
+  CLOSE(socketDescriptor);
+  FREE_CTX(options->ctx);
+  FREE_SSL(ssl);
   return ret;
 }
 
@@ -5314,14 +5287,70 @@ void tlsExtensionAddDefaultKeyShare(bs *tls_extensions) {
 
   bs_append_bytes(tls_extensions, (unsigned char []) {
     0x00, 0x33, // key_share (51)
-    0x00, 0x26, // Length (38)
-    0x00, 0x24, // Key Share List Length (36)
+    0x04, 0xea, // Length (1258)
+    0x04, 0xe8, // Key Share List Length (1256)
     0x00, 0x1d, // Group ID (X25519)
     0x00, 0x20, // Key Exchange Length (32)
   }, 10);
 
   /* Append a random X25519 public key. */
   bs_append_x25519_pubkey(tls_extensions);
+
+  bs_append_bytes(tls_extensions, (unsigned char []) {
+    0x11, 0xec, // Group ID (X25519MLKEM768)
+    0x04, 0xc0, // Length (1216)
+  }, 4);
+
+  /* Append the MLKEM768 encapsulation key with an X25519 key concatenated. */
+  bs_append_mlkem(768, tls_extensions);
+  bs_append_x25519_pubkey(tls_extensions);
+
+  /* Update the length of the extensions. */
+  tlsExtensionUpdateLength(tls_extensions);
+}
+
+/* Adds the supported_groups extension, depending on the version of TLS we're speaking. */
+void tlsExtensionAddSupportedGroups(unsigned int tls_version, bs *tls_extensions) {
+
+  /* The supported groups we send is dependent on what version of TLS we're speaking.  Some groups are only defined for TLS v1.3. */
+  if (tls_version == TLSv1_3) {
+    bs_append_bytes(tls_extensions, (unsigned char []) {
+      0x00, 0x0a, // Extension: supported_groups (10)
+      0x00, 0x18, // Extension Length (24)
+      0x00, 0x16, // Supported Groups List Length (22)
+      0x00, 0x17, // secp256r1
+      0x00, 0x19, // secp521r1
+      0x00, 0x18, // secp384r1
+      0x00, 0x1d, // X25519
+      0x00, 0x1e, // X448
+      0x01, 0x00, // FFDHE2048
+      0x01, 0x01, // FFDHE3072
+      0x01, 0x02, // FFDHE4096
+      0x01, 0x03, // FFDHE6144
+      0x01, 0x04, // FFDHE8192
+      0x11, 0xec, // X25519MLKEM768
+      0x63, 0x99, // X25519Kyber768Draft00
+    }, 30);
+  } else {
+    bs_append_bytes(tls_extensions, (unsigned char []) {
+      0x00, 0x0a, // Extension: supported_groups (10)
+      0x00, 0x1c, // Extension Length (28)
+      0x00, 0x1a, // Supported Groups List Length (26)
+      0x00, 0x17, // secp256r1
+      0x00, 0x19, // secp521r1
+      0x00, 0x1c, // brainpoolP512r1
+      0x00, 0x1b, // brainpoolP384r1
+      0x00, 0x18, // secp384r1
+      0x00, 0x1a, // brainpoolP256r1
+      0x00, 0x16, // secp256k1
+      0x00, 0x0e, // sect571r1
+      0x00, 0x0d, // sect571k1
+      0x00, 0x0b, // sect409k1
+      0x00, 0x0c, // sect409r1
+      0x00, 0x09, // sect283k1
+      0x00, 0x0a, // sect283r1
+    }, 32);
+  }
 
   /* Update the length of the extensions. */
   tlsExtensionUpdateLength(tls_extensions);
@@ -5608,13 +5637,21 @@ int testSupportedGroups(struct sslCheckOptions *options) {
   };
 
 
-  /* Auto-generated by ./tools/iana_tls_supported_groups_parser.py on December 24, 2019. */
 #define COL_PLAIN ""
 #define NID_TYPE_UNUSED 0
 #define NID_TYPE_ECDHE 1 /* For ECDHE curves (sec*, P-256/384-521) */
 #define NID_TYPE_DHE 2   /* For ffdhe* */
 #define NID_TYPE_X25519 3
 #define NID_TYPE_X448 4
+#define NID_TYPE_MLKEM512 5
+#define NID_TYPE_MLKEM768 6
+#define NID_TYPE_MLKEM1024 7
+#define NID_TYPE_X25519MLKEM768 8
+#define NID_TYPE_SECP256R1MLKEM768 9
+#define NID_TYPE_SECP384R1MLKEM1024 10
+#define NID_TYPE_BRAINPOOL_TLS13 11
+#define NID_TYPE_X25519Kyber768Draft00 12
+
   /* Bit strength of DHE 2048 and 3072-bit moduli is taken directly from NIST SP 800-57 pt.1, rev4., pg. 53; DHE 4096, 6144, and 8192 are estimated using that document. */
   struct group_key_exchange group_key_exchanges[] = {
     {0x0001, "sect163k1", 81, COL_RED, NID_sect163k1, NID_TYPE_ECDHE, 0},
@@ -5622,9 +5659,9 @@ int testSupportedGroups(struct sslCheckOptions *options) {
     {0x0003, "sect163r2", 81, COL_RED, NID_sect163r2, NID_TYPE_ECDHE, 0},
     {0x0004, "sect193r1", 96, COL_RED, NID_sect193r1, NID_TYPE_ECDHE, 0},
     {0x0005, "sect193r2", 96, COL_RED, NID_sect193r2, NID_TYPE_ECDHE, 0},
-    {0x0006, "sect233k1", 116, COL_PLAIN, NID_sect233k1, NID_TYPE_ECDHE, 0},
-    {0x0007, "sect233r1", 116, COL_PLAIN, NID_sect233r1, NID_TYPE_ECDHE, 0},
-    {0x0008, "sect239k1", 119, COL_PLAIN, NID_sect239k1, NID_TYPE_ECDHE, 0},
+    {0x0006, "sect233k1", 116, COL_YELLOW, NID_sect233k1, NID_TYPE_ECDHE, 0},
+    {0x0007, "sect233r1", 116, COL_YELLOW, NID_sect233r1, NID_TYPE_ECDHE, 0},
+    {0x0008, "sect239k1", 119, COL_YELLOW, NID_sect239k1, NID_TYPE_ECDHE, 0},
     {0x0009, "sect283k1", 141, COL_PLAIN, NID_sect283k1, NID_TYPE_ECDHE, 0},
     {0x000a, "sect283r1", 141, COL_PLAIN, NID_sect283r1, NID_TYPE_ECDHE, 0},
     {0x000b, "sect409k1", 204, COL_PLAIN, NID_sect409k1, NID_TYPE_ECDHE, 0},
@@ -5636,9 +5673,9 @@ int testSupportedGroups(struct sslCheckOptions *options) {
     {0x0011, "secp160r2", 80, COL_RED, NID_secp160r2, NID_TYPE_ECDHE, 0},
     {0x0012, "secp192k1", 96, COL_RED, NID_secp192k1, NID_TYPE_ECDHE, 0},
     {0x0013, "secp192r1", 96, COL_RED, NID_X9_62_prime192v1, NID_TYPE_ECDHE, 0},
-    {0x0014, "secp224k1", 112, COL_PLAIN, NID_secp224k1, NID_TYPE_ECDHE, 0},
-    {0x0015, "secp224r1", 112, COL_PLAIN, NID_secp224r1, NID_TYPE_ECDHE, 0},
-    {0x0016, "secp256k1", 128, COL_GREEN, NID_secp256k1, NID_TYPE_ECDHE, 0},
+    {0x0014, "secp224k1", 112, COL_YELLOW, NID_secp224k1, NID_TYPE_ECDHE, 0},
+    {0x0015, "secp224r1", 112, COL_YELLOW, NID_secp224r1, NID_TYPE_ECDHE, 0},
+    {0x0016, "secp256k1", 128, COL_GREEN, NID_secp256k1, NID_TYPE_ECDHE, 0},  /* Marked green since this is the very well-tested Bitcoin curve. */
     {0x0017, "secp256r1 (NIST P-256)", 128, COL_PLAIN, NID_X9_62_prime256v1, NID_TYPE_ECDHE, 0},
     {0x0018, "secp384r1 (NIST P-384)", 192, COL_PLAIN, NID_secp384r1, NID_TYPE_ECDHE, 0},
     {0x0019, "secp521r1 (NIST P-521)", 260, COL_PLAIN, NID_secp521r1, NID_TYPE_ECDHE, 0},
@@ -5647,11 +5684,29 @@ int testSupportedGroups(struct sslCheckOptions *options) {
     {0x001c, "brainpoolP512r1", 256, COL_PLAIN, NID_brainpoolP512r1, NID_TYPE_ECDHE, 0},
     {0x001d, "x25519", 128, COL_GREEN, -1, NID_TYPE_X25519, 32},
     {0x001e, "x448", 224, COL_GREEN, -1, NID_TYPE_X448, 56},
-    {0x0100, "ffdhe2048", 112, COL_PLAIN, NID_ffdhe2048, NID_TYPE_DHE, 256},
+    {0x001f, "brainpoolP256r1tls13", 128, COL_PLAIN, -1, NID_TYPE_BRAINPOOL_TLS13, 0},
+    {0x0020, "brainpoolP384r1tls13", 192, COL_PLAIN, -1, NID_TYPE_BRAINPOOL_TLS13, 0},
+    {0x0021, "brainpoolP512r1tls13", 256, COL_PLAIN, -1, NID_TYPE_BRAINPOOL_TLS13, 0},
+    {0x0029, "curveSM2", 128, COL_RED, NID_sm2, NID_TYPE_ECDHE, 0},
+    {0x0100, "ffdhe2048", 112, COL_YELLOW, NID_ffdhe2048, NID_TYPE_DHE, 256},
     {0x0101, "ffdhe3072", 128, COL_PLAIN, NID_ffdhe3072, NID_TYPE_DHE, 384},
     {0x0102, "ffdhe4096", 150, COL_PLAIN, NID_ffdhe4096, NID_TYPE_DHE, 512},
     {0x0103, "ffdhe6144", 175, COL_PLAIN, NID_ffdhe6144, NID_TYPE_DHE, 768},
     {0x0104, "ffdhe8192", 192, COL_PLAIN, NID_ffdhe8192, NID_TYPE_DHE, 1024},
+    /* There are no demonstrated weaknesses with the pure MLKEM groups.
+     * But they've only very recently been standardised, and the implemenations
+     * haven't really been battle-proved to the extent of other groups.
+     * As such, they've flagged in yellow for now, but this should be reconsidered:
+     * - In a couple of years (2027)
+     * - If any significant weaknesses are identified
+     * - If they're considered robust by projects like OpenSSH or OpenSSL */
+    {0x0200, "MLKEM512", 128, COL_YELLOW, -1, NID_TYPE_MLKEM512, 800},
+    {0x0201, "MLKEM768", 192, COL_YELLOW, -1, NID_TYPE_MLKEM768, 1184},
+    {0x0202, "MLKEM1024", 256, COL_YELLOW, -1, NID_TYPE_MLKEM1024, 1568},
+    {0x11eb, "SecP256r1MLKEM768", 192, COL_PLAIN, -1, NID_TYPE_SECP256R1MLKEM768, 1249},
+    {0x11ec, "X25519MLKEM768", 192, COL_GREEN, -1, NID_TYPE_X25519MLKEM768, 1216},
+    {0x11ed, "SecP384r1MLKEM1024", 256, COL_PLAIN, -1, NID_TYPE_SECP384R1MLKEM1024, 1665},
+    {0x6399, "X25519Kyber768Draft00", 192, COL_GREEN, -1, NID_TYPE_X25519Kyber768Draft00, 1216},
   };
 
 
@@ -5704,7 +5759,105 @@ int testSupportedGroups(struct sslCheckOptions *options) {
 	bs_append_x25519_pubkey(key_exchange);
       else if (nid_type == NID_TYPE_X448)
         bs_append_x448_pubkey(key_exchange);
-      else if (nid_type == NID_TYPE_ECDHE) {
+      else if (nid_type == NID_TYPE_MLKEM512) {
+        /* Only defined for TLS v1.3. */
+        if (tls_version != TLSv1_3)
+          continue;
+
+        bs_append_mlkem(512, key_exchange);
+
+      } else if (nid_type == NID_TYPE_MLKEM768) {
+        /* Only defined for TLS v1.3. */
+        if (tls_version != TLSv1_3)
+          continue;
+
+        bs_append_mlkem(768, key_exchange);
+
+      } else if (nid_type == NID_TYPE_MLKEM1024) {
+        /* Only defined for TLS v1.3. */
+        if (tls_version != TLSv1_3)
+          continue;
+
+        bs_append_mlkem(1024, key_exchange);
+
+      } else if ((nid_type == NID_TYPE_X25519MLKEM768) || ((nid_type == NID_TYPE_X25519Kyber768Draft00))) {
+        /* Only defined for TLS v1.3. */
+        if (tls_version != TLSv1_3)
+          continue;
+
+        bs_append_mlkem(768, key_exchange);
+        bs_append_x25519_pubkey(key_exchange);
+
+      } else if ((nid_type == NID_TYPE_SECP256R1MLKEM768) || (nid_type == NID_TYPE_SECP384R1MLKEM1024)) {
+        /* Only defined for TLS v1.3. */
+        if (tls_version != TLSv1_3)
+          continue;
+
+        /* Set the curve and MLKEM variable appropriately. */
+        char *curve = "P-256";
+        int mlkem_variant = 768;
+        if (nid_type == NID_TYPE_SECP384R1MLKEM1024) {
+          curve = "SecP384r1";
+          mlkem_variant = 1024;
+        }
+
+        /* Generate the key. */
+        EVP_PKEY *key = EVP_EC_gen(curve);
+        if (key == NULL) {
+          fprintf(stderr, "Failed to generate %s key.\n", curve);
+          continue;
+        }
+
+        /* Extract the public key. */
+        unsigned char *pubkey_bytes = NULL;
+        size_t pubkey_bytes_len = EVP_PKEY_get1_encoded_public_key(key, &pubkey_bytes);
+        if ((pubkey_bytes == NULL) || (pubkey_bytes_len <= 0)) {
+          EVP_PKEY_free(key); key = NULL;
+          fprintf(stderr, "Failed to get public key bytes for %s key.\n", curve);
+          continue;
+        }
+
+        bs_append_bytes(key_exchange, pubkey_bytes, pubkey_bytes_len);
+        bs_append_mlkem(mlkem_variant, key_exchange);
+
+        OPENSSL_free(pubkey_bytes); pubkey_bytes = NULL;
+        EVP_PKEY_free(key); key = NULL;
+
+      } else if (nid_type == NID_TYPE_BRAINPOOL_TLS13) {
+        /* Only defined for TLS v1.3. */
+        if (tls_version != TLSv1_3)
+          continue;
+
+        /* Copy the group name since we will be modifying it. */
+        char my_group_name[32] = {0};
+        strncpy(my_group_name, group_name, sizeof(my_group_name) - 1);
+
+        /* Strip the trailing "tls13" string from "brainpoolP256r1tls13". */
+        if (strlen(my_group_name) >= 16)
+          my_group_name[15] = '\0';
+
+        /* Generate the braintree public key. */
+        EVP_PKEY *key = EVP_EC_gen(my_group_name);
+        if (key == NULL) {
+          fprintf(stderr, "Failed to generate %s key.\n", my_group_name);
+          continue;
+        }
+
+        /* Get the public key bytes. */
+        unsigned char *pubkey_bytes = NULL;
+        size_t pubkey_bytes_len = EVP_PKEY_get1_encoded_public_key(key, &pubkey_bytes);
+        if ((pubkey_bytes == NULL) || (pubkey_bytes_len <= 0)) {
+          fprintf(stderr, "Failed to get public key bytes for %s key.\n", my_group_name);
+          EVP_PKEY_free(key); key = NULL;
+          continue;
+        }
+
+        bs_append_bytes(key_exchange, pubkey_bytes, pubkey_bytes_len);
+
+        OPENSSL_free(pubkey_bytes); pubkey_bytes = NULL;
+        EVP_PKEY_free(key); key = NULL;
+
+      } else if (nid_type == NID_TYPE_ECDHE) {
 
         /* Generate the ECDHE key. */
         EC_KEY *key = EC_KEY_new_by_curve_name(nid);
@@ -5717,7 +5870,7 @@ int testSupportedGroups(struct sslCheckOptions *options) {
         /* Allocate a *new* byte array and put the key into it. */
         unsigned char *kex_buf = NULL;
         key_exchange_len = EC_KEY_key2buf(key, POINT_CONVERSION_UNCOMPRESSED, &kex_buf, NULL);
-        if (kex_buf == NULL) {
+        if ((key_exchange_len == 0) || (kex_buf == NULL)) {
           EC_KEY_free(key); key = NULL;
           fprintf(stderr, "Failed to obtain ECDHE public key bytes.\n");
           continue;
@@ -5895,6 +6048,8 @@ int testSupportedGroups(struct sslCheckOptions *options) {
       char *bits_color = RESET;
       if (group_bit_strength < 112)
         bits_color = COL_RED;
+      else if (group_bit_strength < 128)
+        bits_color = COL_YELLOW;
       else
         bits_color = COL_GREEN;
 
@@ -6003,24 +6158,11 @@ int testSignatureAlgorithms(struct sslCheckOptions *options) {
       tls_extensions = makeTLSExtensions(options, 0);
 
       if (tls_version == TLSv1_3) {
-        /* Extension: supported_groups */
-        bs_append_bytes(tls_extensions, (unsigned char []) {
-          0x00, 0x0a, // Extension: supported_groups (10)
-          0x00, 0x16, // Extension Length (22)
-          0x00, 0x14, // Supported Groups List Length (20)
-          0x00, 0x17, // secp256r1
-          0x00, 0x19, // secp521r1
-          0x00, 0x18, // secp384r1
-          0x00, 0x1d, // X25519
-          0x00, 0x1e, // X448
-          0x01, 0x00, // FFDHE2048
-          0x01, 0x01, // FFDHE3072
-          0x01, 0x02, // FFDHE4096
-          0x01, 0x03, // FFDHE6144
-          0x01, 0x04, // FFDHE8192
-        }, 26);
 
-        /* Add key shares for X25519. */
+        /* Add the supported_groups extension. */
+        tlsExtensionAddSupportedGroups(tls_version, tls_extensions);
+
+        /* Add key shares for X25519 & X25519MLKEM768. */
         tlsExtensionAddDefaultKeyShare(tls_extensions);
 
         /* Add the supported_versions extension to signify we are using TLS v1.3. */

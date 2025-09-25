@@ -6,20 +6,23 @@ sslscan \- Fast SSL/TLS scanner
 .RI [ options ] " [host:port | host]"
 .SH DESCRIPTION
 .PP
-\fBsslscan\fP queries SSL/TLS services (such as HTTPS) and reports the protocol versions, cipher suites, key exchanges, signature algorithms, and certificates in use.  This helps the user understand which parameters are weak from a security standpoint.
+\fBsslscan\fP queries SSL/TLS services (such as HTTPS) and reports the protocol versions, cipher suites, key exchanges, signature algorithms, and certificates in use.  This helps the user understand which parameters are weak from a security standpoint. \fBsslscan\fP can also output results into an XML file for easy consumption by external programs.
 
 Terminal output is thus colour-coded as follows:
 
-Red Background  NULL cipher (no encryption)
+.B Red Background
+NULL ciphers (no encryption) or anonymous ciphers (no verification of peer)
 .br
-Red             Broken cipher (<= 40 bit), broken protocol (SSLv2 or SSLv3) or broken certificate signing algorithm (MD5)
+.B Red
+Ciphers and algorithms with demonstrated vulnerabilities, or that are generally considered to be untrusted.
 .br
-Yellow          Weak cipher (<= 56 bit or RC4) or weak certificate signing algorithm (SHA-1)
+.B Yellow
+Ciphers and algorithms with known weaknesses or that are still too new to widely trusted, but that are not generally considered exploitable (even by the standards of TLS vulnerabilities).
 .br
-Purple          Anonymous cipher (ADH or AECDH)
-
-\fBsslscan\fP can also output results into an XML file for easy consumption by external programs.
-
+.B Green
+Ciphers and algorithms that are aligned with current recommended best practices.
+.br
+.br
 .SH OPTIONS
 .TP
 .B \-\-help
